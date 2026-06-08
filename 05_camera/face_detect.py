@@ -22,12 +22,16 @@ import cv2
 import numpy as np
 
 # ── Settings ────────────────────────────────────────────────────────────────
-WIDTH         = 640
-HEIGHT        = 480
-FRAMERATE     = 15
-SAVE_SNAPSHOT = True   # save face_snapshot.jpg on first detection
-MIN_FACE_PX   = 60     # ignore detections smaller than this (noise filter)
-WINDOW_TITLE  = "Pi Face Detection  |  Q to quit"
+WIDTH             = 640
+HEIGHT            = 480
+FRAMERATE         = 15
+SAVE_SNAPSHOT     = True   # save face_snapshot.jpg on first detection
+MIN_FACE_PX       = 80     # ignore detections smaller than this (px)
+MAX_FACE_PX       = 400    # ignore unrealistically large detections (px)
+MIN_NEIGHBORS     = 8      # higher = stricter, fewer false positives (default 5)
+SCALE_FACTOR      = 1.1    # pyramid step; lower = more thorough but slower
+CONFIRM_FRAMES    = 3      # face must appear this many frames in a row to show
+WINDOW_TITLE      = "Pi Face Detection  |  Q to quit"
 
 # ── Load Haar Cascade (bundled with OpenCV, no download needed) ──────────────
 cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
@@ -95,7 +99,18 @@ cv2.namedWindow(WINDOW_TITLE, cv2.WINDOW_AUTOSIZE)
 print(f"Live window open — {WIDTH}×{HEIGHT} @ {FRAMERATE} fps")
 print("Press Q in the window to quit.")
 
-snapshot_saved = False
+snapshot_saved  = False
+# Temporal filter: track how many consecutive frames each face has appeared.
+# Key = (cx, cy) bucket; value = streak count.
+face_streaks: dict = {}
+BUCKET = 40   # pixels — two detections within this distance are the same face
+
+def nearest_bucket(cx, cy, streaks, radius):
+    """Return the closest existing bucket key within radius, or None."""
+    for (bx, by) in streaks:
+        if abs(cx - bx) < radius and abs(cy - by) < radius:
+            return (bx, by)
+    return None
 
 try:
     while True:
@@ -112,15 +127,41 @@ try:
         gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         gray  = cv2.equalizeHist(gray)  # helps in dim lighting
 
-        faces = face_cascade.detectMultiScale(
+        raw_faces = face_cascade.detectMultiScale(
             gray,
-            scaleFactor=1.1,
-            minNeighbors=5,
+            scaleFactor=SCALE_FACTOR,
+            minNeighbors=MIN_NEIGHBORS,
             minSize=(MIN_FACE_PX, MIN_FACE_PX),
+            maxSize=(MAX_FACE_PX, MAX_FACE_PX),
         )
 
+        # ── Temporal filter ──────────────────────────────────────────────────
+        # Increment streak for detected faces; decay unseen ones.
+        new_streaks: dict = {}
+        for (x, y, w, h) in (raw_faces if len(raw_faces) else []):
+            cx, cy = x + w // 2, y + h // 2
+            key = nearest_bucket(cx, cy, face_streaks, BUCKET) or (cx, cy)
+            new_streaks[key] = min(face_streaks.get(key, 0) + 1, CONFIRM_FRAMES + 5)
+
+        # Carry forward streaks that are decaying (seen recently but not this frame)
+        for key, count in face_streaks.items():
+            if key not in new_streaks and count > 0:
+                new_streaks[key] = count - 1
+        face_streaks.clear()
+        face_streaks.update({k: v for k, v in new_streaks.items() if v > 0})
+
+        # Only draw faces whose streak meets the confirmation threshold
+        confirmed = [
+            (x, y, w, h)
+            for (x, y, w, h) in (raw_faces if len(raw_faces) else [])
+            if face_streaks.get(
+                nearest_bucket(x + w // 2, y + h // 2, face_streaks, BUCKET),
+                0
+            ) >= CONFIRM_FRAMES
+        ]
+
         # ── Draw bounding boxes ──────────────────────────────────────────────
-        for i, (x, y, w, h) in enumerate(faces):
+        for i, (x, y, w, h) in enumerate(confirmed):
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
             cv2.putText(
                 frame, f"Face {i + 1}",
@@ -129,7 +170,7 @@ try:
             )
 
         # ── HUD: face count top-left ─────────────────────────────────────────
-        hud = f"Faces detected: {len(faces)}"
+        hud = f"Faces detected: {len(confirmed)}"
         cv2.putText(
             frame, hud,
             (10, 30),
@@ -140,7 +181,7 @@ try:
         cv2.imshow(WINDOW_TITLE, frame)
 
         # ── Auto-save first detection ────────────────────────────────────────
-        if len(faces) > 0 and SAVE_SNAPSHOT and not snapshot_saved:
+        if len(confirmed) > 0 and SAVE_SNAPSHOT and not snapshot_saved:
             cv2.imwrite("face_snapshot.jpg", frame)
             print("Snapshot saved → face_snapshot.jpg")
             snapshot_saved = True
