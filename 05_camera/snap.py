@@ -1,26 +1,40 @@
 #!/usr/bin/env python3
 """
-snap.py — Capture a single still image with the Pi Camera module.
+snap.py — Capture a single still image using libcamera-still.
 Saves the image as snap.jpg in the current directory.
 
 Hardware:
   Pi Camera Module connected to the CSI ribbon port.
   Ribbon cable connector faces AWAY from the Ethernet port.
 
-Enable camera:
-  sudo raspi-config  →  Interface Options  →  Camera  →  Enable
+No extra Python libraries needed — uses libcamera-still (pre-installed
+on Raspberry Pi OS Bullseye / Bookworm).
 
-picamera2 is pre-installed on Raspberry Pi OS (Bookworm+).
+Verify camera is detected:
+  libcamera-hello --list-cameras
 """
 
-from picamera2 import Picamera2
-from time import sleep
+import subprocess
+import sys
+from pathlib import Path
 
-cam = Picamera2()
-cam.configure(cam.create_still_configuration())
-cam.start()
-sleep(2)             # allow auto-exposure to settle
-cam.capture_file("snap.jpg")
-cam.stop()
+OUTPUT = "snap.jpg"
 
-print("Image saved as snap.jpg")
+result = subprocess.run(
+    [
+        "libcamera-still",
+        "--nopreview",
+        "--timeout", "2000",   # 2 s auto-exposure settle time (ms)
+        "--output", OUTPUT,
+    ],
+    capture_output=True,
+    text=True,
+)
+
+if result.returncode != 0:
+    print("ERROR: libcamera-still failed")
+    print(result.stderr)
+    sys.exit(1)
+
+size = Path(OUTPUT).stat().st_size
+print(f"Image saved as {OUTPUT}  ({size / 1024:.1f} KB)")

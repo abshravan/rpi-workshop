@@ -1,8 +1,9 @@
 # Python dependencies for the Raspberry Pi Workshop
 # Install with:  pip install -r requirements.txt
 #
-# Note: gpiozero and picamera2 are pre-installed on Raspberry Pi OS.
-# The packages below cover the sensor and LLM examples.
+# Note: gpiozero is pre-installed on Raspberry Pi OS.
+# Camera programs use libcamera-vid / libcamera-still (also pre-installed) — no picamera2 needed.
+# The packages below cover the sensor, camera (OpenCV), and LLM examples.
 
 adafruit-circuitpython-dht
 adafruit-circuitpython-adxl34x
