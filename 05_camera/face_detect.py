@@ -3,8 +3,9 @@
 face_detect.py — Real-time face detection from the Pi Camera live feed.
 Uses libcamera-vid (MJPEG) + OpenCV Haar Cascade — no picamera2 needed.
 
-Detected faces are printed to the terminal with their bounding box.
-Optionally saves a snapshot when a face is first detected.
+Displays a live window with green bounding boxes around detected faces.
+Prints bounding-box coordinates to the terminal and optionally saves a
+snapshot on first detection. Press Q in the window (or Ctrl-C) to quit.
 
 Install dependency:
   pip install opencv-python
@@ -86,6 +87,19 @@ try:
             minSize=(MIN_FACE_PX, MIN_FACE_PX),
         )
 
+        # Draw bounding boxes and label on the live frame
+        for i, (x, y, w, h) in enumerate(faces):
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.putText(frame, f"Face {i+1}", (x, y - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+        # Overlay face count in the top-left corner
+        label = f"Faces: {len(faces)}"
+        cv2.putText(frame, label, (10, 28),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
+
+        cv2.imshow("Face Detection — press Q to quit", frame)
+
         if len(faces) > 0:
             for i, (x, y, w, h) in enumerate(faces):
                 print(f"[frame {frame_count:05d}] Face {i+1}: "
@@ -93,20 +107,17 @@ try:
 
             # Save a snapshot the first time a face appears
             if SAVE_SNAPSHOT and not snapshot_saved:
-                # Draw bounding boxes on the saved image
-                annotated = frame.copy()
-                for (x, y, w, h) in faces:
-                    cv2.rectangle(annotated, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                cv2.imwrite("face_snapshot.jpg", annotated)
-                print(f"  → Snapshot saved as face_snapshot.jpg")
+                cv2.imwrite("face_snapshot.jpg", frame)
+                print("  → Snapshot saved as face_snapshot.jpg")
                 snapshot_saved = True
-        else:
-            # Print a dot every 30 frames so you know it's running
-            if frame_count % 30 == 0:
-                print(".", end="", flush=True)
+
+        # Q key quits the window
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
 
 except KeyboardInterrupt:
     print("\nStopped.")
 finally:
+    cv2.destroyAllWindows()
     proc.terminate()
     proc.wait()
